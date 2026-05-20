@@ -2,11 +2,13 @@
 defineProps<{
   modelValue: string
   isJoined: boolean
+  hasLocalMedia: boolean
 }>()
 
 const emit = defineEmits<{
   'update:modelValue': [value: string]
   'join': []
+  'startMedia': []
   'hangUp': []
 }>()
 </script>
@@ -27,6 +29,9 @@ const emit = defineEmits<{
     <button type="submit" :disabled="isJoined || !modelValue.trim()">
       Join
     </button>
+    <button type="button" :disabled="hasLocalMedia" @click="emit('startMedia')">
+      Start media
+    </button>
     <button type="button" :disabled="!isJoined" @click="emit('hangUp')">
       Hang up
     </button>
@@ -36,7 +41,7 @@ const emit = defineEmits<{
 <style scoped>
 .room-controls {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   gap: 12px;
   align-items: end;
   padding: 16px;

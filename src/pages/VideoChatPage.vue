@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import ChatPanel from '@/components/ChatPanel.vue'
 import ConnectionStatus from '@/components/ConnectionStatus.vue'
 import RoomControls from '@/components/RoomControls.vue'
@@ -18,10 +18,13 @@ const {
   messages,
   error,
   canSendMessage,
+  startLocalMedia,
   joinRoom,
   sendMessage,
   hangUp,
 } = useWebRTC()
+
+const hasLocalMedia = computed(() => localStream.value !== null)
 
 async function join(): Promise<void> {
   await joinRoom(roomDraft.value)
@@ -40,7 +43,9 @@ async function join(): Promise<void> {
     <RoomControls
       v-model="roomDraft"
       :is-joined="isJoined"
+      :has-local-media="hasLocalMedia"
       @join="join"
+      @start-media="startLocalMedia"
       @hang-up="hangUp"
     />
 
