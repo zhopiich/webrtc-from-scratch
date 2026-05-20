@@ -8,6 +8,8 @@
   },
   "scripts": {
     "dev": "vite",
+    "dev:server": "tsx watch server/signaling.ts",
+    "dev:all": "run-p dev dev:server",
     "build": "run-p type-check \"build-only {@}\" --",
     "preview": "vite preview",
     "test:unit": "vitest",
