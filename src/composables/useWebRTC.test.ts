@@ -79,11 +79,41 @@ describe('useWebRTC', () => {
     expect(FakeWebSocket.instances).toHaveLength(0)
   })
 
+  it('joins signaling without requesting camera or microphone', async () => {
+    const rtc = useWebRTC()
+
+    const joinPromise = rtc.joinRoom('demo-room')
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    FakeWebSocket.instances[0]!.open()
+    await joinPromise
+
+    expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled()
+    expect(FakeWebSocket.instances[0]!.sentMessages).toEqual([
+      JSON.stringify({ type: 'join', roomId: 'demo-room' }),
+    ])
+    expect(rtc.signalingState.value).toBe('connected')
+  })
+
+  it('starts local media only when requested', async () => {
+    const track = createTrack()
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockResolvedValue(createStream([track]))
+    const rtc = useWebRTC()
+
+    await rtc.startLocalMedia()
+
+    expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledWith({
+      video: true,
+      audio: true,
+    })
+    expect(rtc.localStream.value).not.toBeNull()
+  })
+
   it('stops local tracks and closes signaling when hanging up after join', async () => {
     const track = createTrack()
     vi.mocked(navigator.mediaDevices.getUserMedia).mockResolvedValue(createStream([track]))
     const rtc = useWebRTC()
 
+    await rtc.startLocalMedia()
     const joinPromise = rtc.joinRoom('demo-room')
     await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
     FakeWebSocket.instances[0]!.open()

@@ -55,10 +55,26 @@ export function useWebRTC() {
   }
 
   async function startLocalMedia(): Promise<void> {
-    localStream.value = await navigator.mediaDevices.getUserMedia({
-      video: true,
-      audio: true,
-    })
+    error.value = ''
+
+    if (localStream.value) {
+      return
+    }
+
+    try {
+      localStream.value = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true,
+      })
+
+      if (peerConnection) {
+        addLocalTracks(peerConnection)
+        await createAndSendOffer()
+      }
+    }
+    catch (caughtError) {
+      error.value = caughtError instanceof Error ? caughtError.message : 'Could not start camera or microphone.'
+    }
   }
 
   function addLocalTracks(pc: RTCPeerConnection): void {
@@ -146,7 +162,10 @@ export function useWebRTC() {
 
   async function createAndSendOffer(): Promise<void> {
     const pc = createPeerConnection()
-    setupDataChannel(pc.createDataChannel('chat'))
+
+    if (!dataChannel) {
+      setupDataChannel(pc.createDataChannel('chat'))
+    }
 
     const offer = await pc.createOffer()
     await pc.setLocalDescription(offer)
@@ -325,7 +344,6 @@ export function useWebRTC() {
     }
 
     try {
-      await startLocalMedia()
       await connectSignaling(normalizedRoomId)
     }
     catch (caughtError) {
@@ -360,6 +378,7 @@ export function useWebRTC() {
     messages,
     error,
     canSendMessage,
+    startLocalMedia,
     joinRoom,
     sendMessage,
     hangUp,
