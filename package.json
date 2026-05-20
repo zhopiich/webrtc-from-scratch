@@ -16,7 +16,8 @@
     "build-only": "vite build",
     "type-check": "vue-tsc --build",
     "lint": "eslint",
-    "lint:fix": "eslint --fix"
+    "lint:fix": "eslint --fix",
+    "start:server": "tsx server/signaling.ts"
   },
   "dependencies": {
     "pinia": "^3.0.4",

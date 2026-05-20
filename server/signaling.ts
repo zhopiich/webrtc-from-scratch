@@ -1,5 +1,6 @@
 import type { RawData } from 'ws'
 import { randomUUID } from 'node:crypto'
+import { createServer } from 'node:http'
 import process from 'node:process'
 import { WebSocket, WebSocketServer } from 'ws'
 
@@ -33,6 +34,16 @@ type ServerMessage
 
 const port = Number(process.env.PORT ?? 3001)
 const rooms = new Map<string, Set<Client>>()
+const server = createServer((request, response) => {
+  if (request.url === '/health') {
+    response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' })
+    response.end('ok\n')
+    return
+  }
+
+  response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' })
+  response.end('WebRTC signaling server\n')
+})
 
 function createClient(socket: WebSocket): Client {
   return {
@@ -144,7 +155,7 @@ function parseMessage(raw: RawData): ClientMessage | null {
   }
 }
 
-const wss = new WebSocketServer({ port })
+const wss = new WebSocketServer({ server })
 
 wss.on('connection', (socket) => {
   const client = createClient(socket)
@@ -179,4 +190,6 @@ wss.on('connection', (socket) => {
   })
 })
 
-process.stdout.write(`Signaling server listening on ws://localhost:${port}\n`)
+server.listen(port, '0.0.0.0', () => {
+  process.stdout.write(`Signaling server listening on ws://0.0.0.0:${port}\n`)
+})
