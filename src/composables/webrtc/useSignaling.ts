@@ -23,6 +23,15 @@ export function useSignaling({
   let joinedRoomId = ''
   let reconnectAttempts = 0
   let shouldReconnect = false
+  const clientId = createClientId()
+
+  function createClientId(): string {
+    if (globalThis.crypto?.randomUUID) {
+      return globalThis.crypto.randomUUID()
+    }
+
+    return Math.random().toString(36).slice(2)
+  }
 
   function clearReconnectTimer(): void {
     if (!reconnectTimer) {
@@ -76,7 +85,7 @@ export function useSignaling({
         isSettled = true
         reconnectAttempts = 0
         signalingState.value = 'connected'
-        sendSignal({ type: 'join', roomId })
+        sendSignal({ type: 'join', roomId, clientId })
         resolve()
       }
 

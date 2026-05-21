@@ -190,9 +190,11 @@ describe('useWebRTC', () => {
     await joinPromise
 
     expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled()
-    expect(FakeWebSocket.instances[0]!.sentMessages).toEqual([
-      JSON.stringify({ type: 'join', roomId: 'demo-room' }),
-    ])
+    expect(JSON.parse(FakeWebSocket.instances[0]!.sentMessages[0]!)).toMatchObject({
+      type: 'join',
+      roomId: 'demo-room',
+      clientId: expect.any(String),
+    })
     expect(rtc.signaling.signalingState.value).toBe('connected')
   })
 

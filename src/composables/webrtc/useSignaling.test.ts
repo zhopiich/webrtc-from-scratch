@@ -67,11 +67,13 @@ describe('useSignaling', () => {
     await vi.advanceTimersByTimeAsync(100)
     FakeWebSocket.instances[1]!.open()
 
+    const firstJoinMessage = JSON.parse(FakeWebSocket.instances[0]!.sentMessages[0]!)
+    const secondJoinMessage = JSON.parse(FakeWebSocket.instances[1]!.sentMessages[0]!)
+
     expect(FakeWebSocket.instances).toHaveLength(2)
     expect(signaling.signalingState.value).toBe('connected')
-    expect(FakeWebSocket.instances[1]!.sentMessages).toEqual([
-      JSON.stringify({ type: 'join', roomId: 'demo-room' }),
-    ])
+    expect(firstJoinMessage).toMatchObject({ type: 'join', roomId: 'demo-room' })
+    expect(secondJoinMessage).toEqual(firstJoinMessage)
   })
 
   it('does not reconnect after signaling is closed manually', async () => {

@@ -32,7 +32,7 @@ export type ServerMessage
     | { type: 'error', message: string }
 
 export type ClientMessage
-  = | { type: 'join', roomId: string }
+  = | { type: 'join', roomId: string, clientId: string }
     | { type: 'offer', sdp: RTCSessionDescriptionInit }
     | { type: 'answer', sdp: RTCSessionDescriptionInit }
     | { type: 'ice-candidate', candidate: RTCIceCandidateInit }
