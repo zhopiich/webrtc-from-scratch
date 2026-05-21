@@ -2,6 +2,7 @@ import type { ServerMessage } from './webrtc/types'
 import { ref } from 'vue'
 import { getIceServers } from './webrtc/iceServers'
 import { useDataChannel } from './webrtc/useDataChannel'
+import { useIceRestart } from './webrtc/useIceRestart'
 import { useLocalMedia } from './webrtc/useLocalMedia'
 import { useSignaling } from './webrtc/useSignaling'
 import { useWebRTCStats } from './webrtc/useWebRTCStats'
@@ -65,6 +66,17 @@ export function useWebRTC() {
     onError: setError,
   })
 
+  const iceRestartControls = useIceRestart({
+    getPeerConnection,
+    sendOffer: (offer) => {
+      signaling.sendSignal({
+        type: 'offer',
+        sdp: offer,
+      })
+    },
+    onError: setError,
+  })
+
   function createPeerConnection(): RTCPeerConnection {
     if (peerConnection) {
       return peerConnection
@@ -86,6 +98,7 @@ export function useWebRTC() {
 
     pc.oniceconnectionstatechange = () => {
       iceConnectionState.value = pc.iceConnectionState
+      iceRestartControls.handleIceConnectionStateChange(pc.iceConnectionState)
     }
 
     pc.onicegatheringstatechange = () => {
@@ -183,6 +196,7 @@ export function useWebRTC() {
   }
 
   function closePeerConnection(): void {
+    iceRestartControls.resetIceRestart()
     dataChannelControls.closeDataChannel()
 
     peerConnection?.close()

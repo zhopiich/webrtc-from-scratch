@@ -1,3 +1,4 @@
+import type { ServerMessage } from './webrtc/types'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useWebRTC } from './useWebRTC'
 
@@ -7,7 +8,7 @@ class FakeWebSocket {
 
   onclose: (() => void) | null = null
   onerror: (() => void) | null = null
-  onmessage: ((event: MessageEvent<string>) => void) | null = null
+  onmessage: ((event: MessageEvent<string>) => unknown) | null = null
   onopen: (() => void) | null = null
   readyState = 0
   sentMessages: string[] = []
@@ -31,6 +32,96 @@ class FakeWebSocket {
   send(message: string): void {
     this.sentMessages.push(message)
   }
+
+  async receive(message: ServerMessage): Promise<void> {
+    await this.onmessage?.({
+      data: JSON.stringify(message),
+    } as MessageEvent<string>)
+  }
+}
+
+class FakeMediaStream {
+  tracks: MediaStreamTrack[] = []
+
+  addTrack(track: MediaStreamTrack): void {
+    this.tracks.push(track)
+  }
+}
+
+class FakeDataChannel {
+  onclose: (() => void) | null = null
+  onerror: (() => void) | null = null
+  onmessage: ((event: MessageEvent<string>) => void) | null = null
+  onopen: (() => void) | null = null
+  readyState = 'connecting'
+
+  close(): void {
+    this.readyState = 'closed'
+    this.onclose?.()
+  }
+
+  send = vi.fn()
+}
+
+class FakeRTCPeerConnection {
+  static instances: FakeRTCPeerConnection[] = []
+
+  connectionState: RTCPeerConnectionState = 'new'
+  iceConnectionState: RTCIceConnectionState = 'new'
+  iceGatheringState: RTCIceGatheringState = 'new'
+  signalingState: RTCSignalingState = 'stable'
+  remoteDescription: RTCSessionDescriptionInit | null = null
+  localDescription: RTCSessionDescriptionInit | null = null
+  createdOffers: RTCOfferOptions[] = []
+  onconnectionstatechange: (() => void) | null = null
+  ondatachannel: ((event: RTCDataChannelEvent) => void) | null = null
+  onicecandidate: ((event: RTCPeerConnectionIceEvent) => void) | null = null
+  oniceconnectionstatechange: (() => void) | null = null
+  onicegatheringstatechange: (() => void) | null = null
+  ontrack: ((event: RTCTrackEvent) => void) | null = null
+
+  addIceCandidate = vi.fn()
+  addTrack = vi.fn()
+  restartIce = vi.fn()
+
+  constructor(public readonly configuration?: RTCConfiguration) {
+    FakeRTCPeerConnection.instances.push(this)
+  }
+
+  close(): void {
+    this.connectionState = 'closed'
+    this.iceConnectionState = 'closed'
+  }
+
+  createDataChannel(): RTCDataChannel {
+    return new FakeDataChannel() as unknown as RTCDataChannel
+  }
+
+  async createOffer(options?: RTCOfferOptions): Promise<RTCSessionDescriptionInit> {
+    this.createdOffers.push(options ?? {})
+    return { type: 'offer', sdp: 'offer-sdp' }
+  }
+
+  async createAnswer(): Promise<RTCSessionDescriptionInit> {
+    return { type: 'answer', sdp: 'answer-sdp' }
+  }
+
+  async setLocalDescription(description: RTCSessionDescriptionInit): Promise<void> {
+    this.localDescription = description
+  }
+
+  async setRemoteDescription(description: RTCSessionDescriptionInit): Promise<void> {
+    this.remoteDescription = description
+  }
+
+  async getStats(): Promise<RTCStatsReport> {
+    return new Map() as unknown as RTCStatsReport
+  }
+
+  changeIceConnectionState(state: RTCIceConnectionState): void {
+    this.iceConnectionState = state
+    this.oniceconnectionstatechange?.()
+  }
 }
 
 function createTrack() {
@@ -51,10 +142,13 @@ function createStream(tracks: MediaStreamTrack[]) {
 
 describe('useWebRTC', () => {
   const originalWebSocket = globalThis.WebSocket
+  const originalRTCPeerConnection = globalThis.RTCPeerConnection
+  const originalMediaStream = globalThis.MediaStream
   const originalMediaDevices = navigator.mediaDevices
 
   beforeEach(() => {
     FakeWebSocket.instances.length = 0
+    FakeRTCPeerConnection.instances.length = 0
     vi.stubGlobal('WebSocket', FakeWebSocket)
     Object.defineProperty(navigator, 'mediaDevices', {
       configurable: true,
@@ -66,12 +160,15 @@ describe('useWebRTC', () => {
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     vi.unstubAllGlobals()
     Object.defineProperty(navigator, 'mediaDevices', {
       configurable: true,
       value: originalMediaDevices,
     })
     globalThis.WebSocket = originalWebSocket
+    globalThis.RTCPeerConnection = originalRTCPeerConnection
+    globalThis.MediaStream = originalMediaStream
   })
 
   it('does not request media or connect signaling when room id is empty', async () => {
@@ -153,5 +250,36 @@ describe('useWebRTC', () => {
     expect(rtc.signaling.roomId.value).toBe('')
     expect(rtc.signaling.isJoined.value).toBe(false)
     expect(rtc.signaling.signalingState.value).toBe('idle')
+  })
+
+  it('delegates ICE failure recovery and sends a restart offer', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('RTCPeerConnection', FakeRTCPeerConnection)
+    vi.stubGlobal('MediaStream', FakeMediaStream)
+    const rtc = useWebRTC()
+
+    const joinPromise = rtc.signaling.joinRoom('demo-room')
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    FakeWebSocket.instances[0]!.open()
+    await joinPromise
+    await FakeWebSocket.instances[0]!.receive({ type: 'peer-joined' })
+
+    const peerConnection = FakeRTCPeerConnection.instances[0]!
+
+    peerConnection.changeIceConnectionState('failed')
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(peerConnection.restartIce).toHaveBeenCalledOnce()
+    expect(peerConnection.createdOffers).toEqual([
+      {},
+      { iceRestart: true },
+    ])
+    expect(JSON.parse(FakeWebSocket.instances[0]!.sentMessages.at(-1)!)).toEqual({
+      type: 'offer',
+      sdp: { type: 'offer', sdp: 'offer-sdp' },
+    })
+
+    rtc.hangUp()
+    vi.useRealTimers()
   })
 })
