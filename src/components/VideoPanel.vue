@@ -9,16 +9,26 @@ const props = defineProps<{
 const localVideo = useTemplateRef<HTMLVideoElement>('localVideo')
 const remoteVideo = useTemplateRef<HTMLVideoElement>('remoteVideo')
 
-watch(() => props.localStream, (stream) => {
-  if (localVideo.value) {
-    localVideo.value.srcObject = stream
+function attachStream(video: HTMLVideoElement | null, stream: MediaStream | null): void {
+  if (!video || video.srcObject === stream) {
+    return
   }
+
+  video.srcObject = stream
+
+  if (stream) {
+    void video.play().catch(() => {
+      // The user can still start playback through the browser UI if autoplay is blocked.
+    })
+  }
+}
+
+watch([() => props.localStream, localVideo], ([stream, video]) => {
+  attachStream(video, stream)
 }, { immediate: true })
 
-watch(() => props.remoteStream, (stream) => {
-  if (remoteVideo.value) {
-    remoteVideo.value.srcObject = stream
-  }
+watch([() => props.remoteStream, remoteVideo], ([stream, video]) => {
+  attachStream(video, stream)
 }, { immediate: true })
 </script>
 
@@ -62,6 +72,7 @@ video {
   width: 100%;
   aspect-ratio: 16 / 9;
   background: #111827;
+  object-fit: cover;
 }
 
 @media (max-width: 760px) {
