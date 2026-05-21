@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import ChatPanel from '@/components/ChatPanel.vue'
 import ConnectionStatus from '@/components/ConnectionStatus.vue'
+import MediaControls from '@/components/MediaControls.vue'
 import RoomControls from '@/components/RoomControls.vue'
 import VideoPanel from '@/components/VideoPanel.vue'
 import { useWebRTC } from '@/composables/useWebRTC'
@@ -17,8 +18,17 @@ const {
   dataChannelState,
   messages,
   error,
+  audioInputDevices,
+  videoInputDevices,
+  selectedAudioInputId,
+  selectedVideoInputId,
+  isAudioMuted,
+  isVideoOff,
   canSendMessage,
   startLocalMedia,
+  switchMediaDevice,
+  toggleAudioMuted,
+  toggleVideoOff,
   joinRoom,
   sendMessage,
   hangUp,
@@ -43,10 +53,23 @@ async function join(): Promise<void> {
     <RoomControls
       v-model="roomDraft"
       :is-joined="isJoined"
-      :has-local-media="hasLocalMedia"
       @join="join"
-      @start-media="startLocalMedia"
       @hang-up="hangUp"
+    />
+
+    <MediaControls
+      :audio-input-devices="audioInputDevices"
+      :video-input-devices="videoInputDevices"
+      :selected-audio-input-id="selectedAudioInputId"
+      :selected-video-input-id="selectedVideoInputId"
+      :has-local-media="hasLocalMedia"
+      :is-audio-muted="isAudioMuted"
+      :is-video-off="isVideoOff"
+      @start-media="startLocalMedia"
+      @select-audio-input="switchMediaDevice('audioinput', $event)"
+      @select-video-input="switchMediaDevice('videoinput', $event)"
+      @toggle-audio-muted="toggleAudioMuted"
+      @toggle-video-off="toggleVideoOff"
     />
 
     <ConnectionStatus

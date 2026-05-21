@@ -37,6 +37,12 @@ export function useWebRTC() {
   const dataChannelState = ref<DataChannelStatus>('idle')
   const messages = ref<ChatMessage[]>([])
   const error = ref('')
+  const audioInputDevices = ref<MediaDeviceInfo[]>([])
+  const videoInputDevices = ref<MediaDeviceInfo[]>([])
+  const selectedAudioInputId = ref('')
+  const selectedVideoInputId = ref('')
+  const isAudioMuted = ref(false)
+  const isVideoOff = ref(false)
 
   let socket: WebSocket | null = null
   let peerConnection: RTCPeerConnection | null = null
@@ -54,6 +60,37 @@ export function useWebRTC() {
     socket.send(JSON.stringify(message))
   }
 
+  async function loadDevices(): Promise<void> {
+    if (!navigator.mediaDevices?.enumerateDevices) {
+      return
+    }
+
+    const devices = await navigator.mediaDevices.enumerateDevices()
+    audioInputDevices.value = devices.filter(device => device.kind === 'audioinput')
+    videoInputDevices.value = devices.filter(device => device.kind === 'videoinput')
+  }
+
+  function getMediaConstraints(): MediaStreamConstraints {
+    return {
+      video: selectedVideoInputId.value
+        ? { deviceId: { exact: selectedVideoInputId.value } }
+        : true,
+      audio: selectedAudioInputId.value
+        ? { deviceId: { exact: selectedAudioInputId.value } }
+        : true,
+    }
+  }
+
+  function applyTrackState(): void {
+    for (const track of localStream.value?.getAudioTracks() ?? []) {
+      track.enabled = !isAudioMuted.value
+    }
+
+    for (const track of localStream.value?.getVideoTracks() ?? []) {
+      track.enabled = !isVideoOff.value
+    }
+  }
+
   async function startLocalMedia(): Promise<void> {
     error.value = ''
 
@@ -62,10 +99,9 @@ export function useWebRTC() {
     }
 
     try {
-      localStream.value = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true,
-      })
+      localStream.value = await navigator.mediaDevices.getUserMedia(getMediaConstraints())
+      applyTrackState()
+      await loadDevices()
 
       if (peerConnection) {
         addLocalTracks(peerConnection)
@@ -75,6 +111,55 @@ export function useWebRTC() {
     catch (caughtError) {
       error.value = caughtError instanceof Error ? caughtError.message : 'Could not start camera or microphone.'
     }
+  }
+
+  async function switchMediaDevice(kind: 'audioinput' | 'videoinput', deviceId: string): Promise<void> {
+    error.value = ''
+
+    if (kind === 'audioinput') {
+      selectedAudioInputId.value = deviceId
+    }
+    else {
+      selectedVideoInputId.value = deviceId
+    }
+
+    if (!localStream.value) {
+      return
+    }
+
+    try {
+      const nextStream = await navigator.mediaDevices.getUserMedia(getMediaConstraints())
+      const previousStream = localStream.value
+      localStream.value = nextStream
+      applyTrackState()
+
+      for (const track of previousStream.getTracks()) {
+        track.stop()
+      }
+
+      if (peerConnection) {
+        for (const sender of peerConnection.getSenders()) {
+          const nextTrack = nextStream.getTracks().find(track => track.kind === sender.track?.kind)
+
+          if (nextTrack) {
+            await sender.replaceTrack(nextTrack)
+          }
+        }
+      }
+    }
+    catch (caughtError) {
+      error.value = caughtError instanceof Error ? caughtError.message : 'Could not switch media device.'
+    }
+  }
+
+  function toggleAudioMuted(): void {
+    isAudioMuted.value = !isAudioMuted.value
+    applyTrackState()
+  }
+
+  function toggleVideoOff(): void {
+    isVideoOff.value = !isVideoOff.value
+    applyTrackState()
   }
 
   function addLocalTracks(pc: RTCPeerConnection): void {
@@ -249,6 +334,8 @@ export function useWebRTC() {
 
     localStream.value?.getTracks().forEach(track => track.stop())
     localStream.value = null
+    isAudioMuted.value = false
+    isVideoOff.value = false
 
     roomId.value = ''
     isJoined.value = false
@@ -377,8 +464,18 @@ export function useWebRTC() {
     dataChannelState,
     messages,
     error,
+    audioInputDevices,
+    videoInputDevices,
+    selectedAudioInputId,
+    selectedVideoInputId,
+    isAudioMuted,
+    isVideoOff,
     canSendMessage,
+    loadDevices,
     startLocalMedia,
+    switchMediaDevice,
+    toggleAudioMuted,
+    toggleVideoOff,
     joinRoom,
     sendMessage,
     hangUp,
