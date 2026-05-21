@@ -13,6 +13,7 @@ interface Client {
 interface JoinMessage {
   type: 'join'
   roomId: string
+  clientId?: string
 }
 
 type RelayMessage
@@ -82,28 +83,73 @@ function relayToPeers(client: Client, message: RelayMessage): void {
   }
 }
 
-function joinRoom(client: Client, roomId: string): void {
+function removeClientFromRoom(client: Client, notifyPeers: boolean): void {
+  if (!client.roomId) {
+    return
+  }
+
+  const roomId = client.roomId
+  const room = rooms.get(roomId)
+
+  client.roomId = null
+
+  if (!room) {
+    return
+  }
+
+  room.delete(client)
+
+  if (notifyPeers) {
+    for (const peer of room) {
+      send(peer, { type: 'peer-left' })
+    }
+  }
+
+  if (room.size === 0) {
+    rooms.delete(roomId)
+  }
+}
+
+function joinRoom(client: Client, roomId: string, clientId?: string): void {
   const normalizedRoomId = roomId.trim()
+  const normalizedClientId = clientId?.trim()
 
   if (!normalizedRoomId) {
     sendError(client, 'Room id is required.')
     return
   }
 
+  if (normalizedClientId) {
+    client.id = normalizedClientId
+  }
+
+  if (client.roomId && client.roomId !== normalizedRoomId) {
+    removeClientFromRoom(client, true)
+  }
+
   const existingRoom = rooms.get(normalizedRoomId) ?? new Set<Client>()
+  const replacedClient = [...existingRoom].find(peer => peer !== client && peer.id === client.id)
+
+  if (replacedClient) {
+    // A reconnect can arrive before the old WebSocket closes. Replace that stale
+    // socket so the same browser tab is not counted as a third room member.
+    removeClientFromRoom(replacedClient, false)
+    replacedClient.socket.close()
+  }
 
   if (existingRoom.size >= 2) {
     send(client, { type: 'room-full' })
     return
   }
 
+  const isNewPeer = !existingRoom.has(client) && !replacedClient
   client.roomId = normalizedRoomId
   existingRoom.add(client)
   rooms.set(normalizedRoomId, existingRoom)
 
   send(client, { type: 'room-joined', roomId: normalizedRoomId })
 
-  if (existingRoom.size === 2) {
+  if (isNewPeer && existingRoom.size === 2) {
     for (const peer of existingRoom) {
       if (peer !== client) {
         send(peer, { type: 'peer-joined' })
@@ -113,34 +159,18 @@ function joinRoom(client: Client, roomId: string): void {
 }
 
 function leaveRoom(client: Client): void {
-  if (!client.roomId) {
-    return
-  }
-
-  const room = rooms.get(client.roomId)
-  if (!room) {
-    client.roomId = null
-    return
-  }
-
-  room.delete(client)
-
-  for (const peer of room) {
-    send(peer, { type: 'peer-left' })
-  }
-
-  if (room.size === 0) {
-    rooms.delete(client.roomId)
-  }
-
-  client.roomId = null
+  removeClientFromRoom(client, true)
 }
 
 function parseMessage(raw: RawData): ClientMessage | null {
   try {
     const message = JSON.parse(raw.toString()) as ClientMessage
 
-    if (message.type === 'join' && typeof message.roomId === 'string') {
+    if (
+      message.type === 'join'
+      && typeof message.roomId === 'string'
+      && (message.clientId === undefined || typeof message.clientId === 'string')
+    ) {
       return message
     }
 
@@ -169,7 +199,7 @@ wss.on('connection', (socket) => {
     }
 
     if (message.type === 'join') {
-      joinRoom(client, message.roomId)
+      joinRoom(client, message.roomId, message.clientId)
       return
     }
 
