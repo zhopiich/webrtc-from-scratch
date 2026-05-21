@@ -3,6 +3,7 @@ defineProps<{
   signalingState: string
   connectionState: string
   dataChannelState: string
+  notices: string[]
   error: string
 }>()
 </script>
@@ -24,6 +25,11 @@ defineProps<{
     <p v-if="error" class="error">
       {{ error }}
     </p>
+    <div v-if="notices.length" class="notices">
+      <p v-for="notice in notices" :key="notice">
+        {{ notice }}
+      </p>
+    </div>
   </section>
 </template>
 
@@ -35,7 +41,8 @@ defineProps<{
 }
 
 div,
-.error {
+.error,
+.notices {
   min-height: 72px;
   border: 1px solid #d7dde5;
   border-radius: 8px;
@@ -64,6 +71,22 @@ strong {
   border-color: #f2b8b5;
   background: #fff5f5;
   color: #9f1239;
+}
+
+.notices {
+  grid-column: 1 / -1;
+  min-height: 0;
+  border-color: #f0d28a;
+  background: #fff9e8;
+  color: #744210;
+}
+
+.notices p {
+  margin: 0;
+}
+
+.notices p + p {
+  margin-top: 8px;
 }
 
 @media (max-width: 680px) {

@@ -1,6 +1,6 @@
 import type { ServerMessage } from './webrtc/types'
-import { ref } from 'vue'
-import { getIceServers } from './webrtc/iceServers'
+import { computed, ref } from 'vue'
+import { getIceServerConfigWarning, getIceServers } from './webrtc/iceServers'
 import { useDataChannel } from './webrtc/useDataChannel'
 import { useIceRestart } from './webrtc/useIceRestart'
 import { useLocalMedia } from './webrtc/useLocalMedia'
@@ -19,6 +19,10 @@ export function useWebRTC() {
   const iceConnectionState = ref<RTCIceConnectionState>('new')
   const iceGatheringState = ref<RTCIceGatheringState>('new')
   const error = ref('')
+  const configurationNotices = computed(() => {
+    const turnWarning = getIceServerConfigWarning()
+    return turnWarning ? [turnWarning] : []
+  })
 
   let peerConnection: RTCPeerConnection | null = null
   let pendingIceCandidates: RTCIceCandidateInit[] = []
@@ -336,6 +340,7 @@ export function useWebRTC() {
     peer,
     chat,
     stats,
+    configurationNotices,
     error,
     hangUp,
   }
