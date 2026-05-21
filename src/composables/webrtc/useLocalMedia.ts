@@ -6,6 +6,30 @@ interface UseLocalMediaOptions {
   onError: (message: string) => void
 }
 
+function getMediaErrorMessage(error: unknown): string {
+  if (!(error instanceof DOMException)) {
+    return 'Could not start camera or microphone.'
+  }
+
+  if (error.name === 'NotAllowedError' || error.name === 'SecurityError') {
+    return 'Camera or microphone permission was denied. Allow access in the browser site settings, then try again.'
+  }
+
+  if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+    return 'No camera or microphone device was found. Connect a device, then try again.'
+  }
+
+  if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
+    return 'Camera or microphone is already in use or cannot be opened by the system.'
+  }
+
+  if (error.name === 'OverconstrainedError' || error.name === 'ConstraintNotSatisfiedError') {
+    return 'The selected camera or microphone is not available. Choose another device, then try again.'
+  }
+
+  return error.message || 'Could not start camera or microphone.'
+}
+
 export function useLocalMedia({ getPeerConnection, onStreamStarted, onError }: UseLocalMediaOptions) {
   const localStream = ref<MediaStream | null>(null)
   const audioInputDevices = ref<MediaDeviceInfo[]>([])
@@ -51,6 +75,11 @@ export function useLocalMedia({ getPeerConnection, onStreamStarted, onError }: U
       return
     }
 
+    if (!navigator.mediaDevices?.getUserMedia) {
+      onError('Camera and microphone require a supported browser and a secure context such as HTTPS or localhost.')
+      return
+    }
+
     try {
       localStream.value = await navigator.mediaDevices.getUserMedia(getMediaConstraints())
       applyTrackState()
@@ -58,7 +87,7 @@ export function useLocalMedia({ getPeerConnection, onStreamStarted, onError }: U
       await onStreamStarted()
     }
     catch (caughtError) {
-      onError(caughtError instanceof Error ? caughtError.message : 'Could not start camera or microphone.')
+      onError(getMediaErrorMessage(caughtError))
     }
   }
 
@@ -97,7 +126,7 @@ export function useLocalMedia({ getPeerConnection, onStreamStarted, onError }: U
       }
     }
     catch (caughtError) {
-      onError(caughtError instanceof Error ? caughtError.message : 'Could not switch media device.')
+      onError(getMediaErrorMessage(caughtError))
     }
   }
 
