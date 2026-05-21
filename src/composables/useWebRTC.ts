@@ -281,33 +281,49 @@ export function useWebRTC() {
     await localMedia.switchMediaDevice(kind, deviceId)
   }
 
-  return {
+  const media = {
     localStream: localMedia.localStream,
     remoteStream,
-    roomId,
-    isJoined,
-    connectionState,
-    signalingState: signaling.signalingState,
-    dataChannelState: dataChannelControls.dataChannelState,
-    iceConnectionState,
-    iceGatheringState,
-    messages: dataChannelControls.messages,
-    error,
-    stats: statsControls.stats,
     audioInputDevices: localMedia.audioInputDevices,
     videoInputDevices: localMedia.videoInputDevices,
     selectedAudioInputId: localMedia.selectedAudioInputId,
     selectedVideoInputId: localMedia.selectedVideoInputId,
     isAudioMuted: localMedia.isAudioMuted,
     isVideoOff: localMedia.isVideoOff,
-    canSendMessage: dataChannelControls.canSendMessage,
     loadDevices: localMedia.loadDevices,
     startLocalMedia,
     switchMediaDevice,
     toggleAudioMuted: localMedia.toggleAudioMuted,
     toggleVideoOff: localMedia.toggleVideoOff,
+  }
+  const signalingState = {
+    roomId,
+    isJoined,
+    signalingState: signaling.signalingState,
     joinRoom,
+  }
+  const peer = {
+    connectionState,
+    iceConnectionState,
+    iceGatheringState,
+  }
+  const chat = {
+    dataChannelState: dataChannelControls.dataChannelState,
+    messages: dataChannelControls.messages,
+    canSendMessage: dataChannelControls.canSendMessage,
     sendMessage: dataChannelControls.sendMessage,
+  }
+  const stats = {
+    current: statsControls.stats,
+  }
+
+  return {
+    media,
+    signaling: signalingState,
+    peer,
+    chat,
+    stats,
+    error,
     hangUp,
   }
 }
