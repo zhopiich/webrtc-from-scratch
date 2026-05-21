@@ -16,6 +16,7 @@ const {
   peer,
   chat,
   stats,
+  configurationNotices,
   error,
   hangUp,
 } = useWebRTC()
@@ -62,6 +63,7 @@ async function join(): Promise<void> {
       :signaling-state="signaling.signalingState.value"
       :connection-state="peer.connectionState.value"
       :data-channel-state="chat.dataChannelState.value"
+      :notices="configurationNotices"
       :error="error"
     />
 
