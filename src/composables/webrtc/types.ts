@@ -18,7 +18,7 @@ export interface WebRTCStats {
   videoCodec: string
 }
 
-export type SignalingState = 'idle' | 'connecting' | 'connected' | 'closed' | 'error'
+export type SignalingState = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'closed' | 'error'
 export type DataChannelStatus = 'idle' | 'connecting' | 'open' | 'closed'
 
 export type ServerMessage
