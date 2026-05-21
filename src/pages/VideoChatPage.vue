@@ -4,6 +4,7 @@ import ChatPanel from '@/components/ChatPanel.vue'
 import ConnectionStatus from '@/components/ConnectionStatus.vue'
 import MediaControls from '@/components/MediaControls.vue'
 import RoomControls from '@/components/RoomControls.vue'
+import StatsPanel from '@/components/StatsPanel.vue'
 import VideoPanel from '@/components/VideoPanel.vue'
 import { useWebRTC } from '@/composables/useWebRTC'
 
@@ -16,8 +17,11 @@ const {
   connectionState,
   signalingState,
   dataChannelState,
+  iceConnectionState,
+  iceGatheringState,
   messages,
   error,
+  stats,
   audioInputDevices,
   videoInputDevices,
   selectedAudioInputId,
@@ -77,6 +81,13 @@ async function join(): Promise<void> {
       :connection-state="connectionState"
       :data-channel-state="dataChannelState"
       :error="error"
+    />
+
+    <StatsPanel
+      :signaling-state="signalingState"
+      :ice-connection-state="iceConnectionState"
+      :ice-gathering-state="iceGatheringState"
+      :stats="stats"
     />
 
     <VideoPanel
