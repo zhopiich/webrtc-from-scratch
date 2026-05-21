@@ -9,6 +9,8 @@ import { useWebRTCStats } from './webrtc/useWebRTCStats'
 export type { WebRTCStats } from './webrtc/types'
 
 const signalingUrl = import.meta.env.VITE_SIGNALING_URL || 'ws://localhost:3001'
+const iceDisconnectedRestartDelayMs = 3000
+const maxIceRestartAttempts = 3
 
 export function useWebRTC() {
   const remoteStream = ref<MediaStream | null>(null)
@@ -21,6 +23,9 @@ export function useWebRTC() {
 
   let peerConnection: RTCPeerConnection | null = null
   let pendingIceCandidates: RTCIceCandidateInit[] = []
+  let iceRestartTimer: ReturnType<typeof setTimeout> | null = null
+  let iceRestartAttempts = 0
+  let isRestartingIce = false
 
   function setError(message: string): void {
     error.value = message
@@ -28,6 +33,21 @@ export function useWebRTC() {
 
   function getPeerConnection(): RTCPeerConnection | null {
     return peerConnection
+  }
+
+  function clearIceRestartTimer(): void {
+    if (!iceRestartTimer) {
+      return
+    }
+
+    clearTimeout(iceRestartTimer)
+    iceRestartTimer = null
+  }
+
+  function resetIceRestartState(): void {
+    clearIceRestartTimer()
+    iceRestartAttempts = 0
+    isRestartingIce = false
   }
 
   const statsControls = useWebRTCStats({ getPeerConnection })
@@ -86,6 +106,20 @@ export function useWebRTC() {
 
     pc.oniceconnectionstatechange = () => {
       iceConnectionState.value = pc.iceConnectionState
+
+      if (pc.iceConnectionState === 'failed') {
+        scheduleIceRestart(0)
+        return
+      }
+
+      if (pc.iceConnectionState === 'disconnected') {
+        scheduleIceRestart(iceDisconnectedRestartDelayMs)
+        return
+      }
+
+      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+        resetIceRestartState()
+      }
     }
 
     pc.onicegatheringstatechange = () => {
@@ -137,6 +171,47 @@ export function useWebRTC() {
     })
   }
 
+  function scheduleIceRestart(delayMs: number): void {
+    if (iceRestartTimer || isRestartingIce) {
+      return
+    }
+
+    iceRestartTimer = setTimeout(() => {
+      iceRestartTimer = null
+      restartIce().catch((caughtError) => {
+        error.value = caughtError instanceof Error ? caughtError.message : 'Could not restart ICE.'
+      })
+    }, delayMs)
+  }
+
+  async function restartIce(): Promise<void> {
+    if (!peerConnection || peerConnection.signalingState !== 'stable') {
+      return
+    }
+
+    if (iceRestartAttempts >= maxIceRestartAttempts) {
+      error.value = 'Could not recover peer connection.'
+      return
+    }
+
+    isRestartingIce = true
+    iceRestartAttempts += 1
+
+    try {
+      peerConnection.restartIce?.()
+      const offer = await peerConnection.createOffer({ iceRestart: true })
+      await peerConnection.setLocalDescription(offer)
+
+      signaling.sendSignal({
+        type: 'offer',
+        sdp: offer,
+      })
+    }
+    finally {
+      isRestartingIce = false
+    }
+  }
+
   async function flushPendingIceCandidates(): Promise<void> {
     if (!peerConnection || !peerConnection.remoteDescription) {
       return
@@ -183,6 +258,7 @@ export function useWebRTC() {
   }
 
   function closePeerConnection(): void {
+    resetIceRestartState()
     dataChannelControls.closeDataChannel()
 
     peerConnection?.close()
