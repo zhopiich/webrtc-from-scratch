@@ -77,7 +77,7 @@ describe('useWebRTC', () => {
   it('does not request media or connect signaling when room id is empty', async () => {
     const rtc = useWebRTC()
 
-    await rtc.joinRoom('   ')
+    await rtc.signaling.joinRoom('   ')
 
     expect(rtc.error.value).toBe('Room id is required.')
     expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled()
@@ -87,7 +87,7 @@ describe('useWebRTC', () => {
   it('joins signaling without requesting camera or microphone', async () => {
     const rtc = useWebRTC()
 
-    const joinPromise = rtc.joinRoom('demo-room')
+    const joinPromise = rtc.signaling.joinRoom('demo-room')
     await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
     FakeWebSocket.instances[0]!.open()
     await joinPromise
@@ -96,7 +96,7 @@ describe('useWebRTC', () => {
     expect(FakeWebSocket.instances[0]!.sentMessages).toEqual([
       JSON.stringify({ type: 'join', roomId: 'demo-room' }),
     ])
-    expect(rtc.signalingState.value).toBe('connected')
+    expect(rtc.signaling.signalingState.value).toBe('connected')
   })
 
   it('starts local media only when requested', async () => {
@@ -104,13 +104,13 @@ describe('useWebRTC', () => {
     vi.mocked(navigator.mediaDevices.getUserMedia).mockResolvedValue(createStream([track]))
     const rtc = useWebRTC()
 
-    await rtc.startLocalMedia()
+    await rtc.media.startLocalMedia()
 
     expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledWith({
       video: true,
       audio: true,
     })
-    expect(rtc.localStream.value).not.toBeNull()
+    expect(rtc.media.localStream.value).not.toBeNull()
   })
 
   it('toggles audio and video tracks without stopping media', async () => {
@@ -122,14 +122,14 @@ describe('useWebRTC', () => {
     vi.mocked(navigator.mediaDevices.getUserMedia).mockResolvedValue(createStream([audioTrack, videoTrack]))
     const rtc = useWebRTC()
 
-    await rtc.startLocalMedia()
-    rtc.toggleAudioMuted()
-    rtc.toggleVideoOff()
+    await rtc.media.startLocalMedia()
+    rtc.media.toggleAudioMuted()
+    rtc.media.toggleVideoOff()
 
     expect(audioTrack.enabled).toBe(false)
     expect(videoTrack.enabled).toBe(false)
-    expect(rtc.isAudioMuted.value).toBe(true)
-    expect(rtc.isVideoOff.value).toBe(true)
+    expect(rtc.media.isAudioMuted.value).toBe(true)
+    expect(rtc.media.isVideoOff.value).toBe(true)
     expect(audioTrack.stop).not.toHaveBeenCalled()
     expect(videoTrack.stop).not.toHaveBeenCalled()
   })
@@ -139,8 +139,8 @@ describe('useWebRTC', () => {
     vi.mocked(navigator.mediaDevices.getUserMedia).mockResolvedValue(createStream([track]))
     const rtc = useWebRTC()
 
-    await rtc.startLocalMedia()
-    const joinPromise = rtc.joinRoom('demo-room')
+    await rtc.media.startLocalMedia()
+    const joinPromise = rtc.signaling.joinRoom('demo-room')
     await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
     FakeWebSocket.instances[0]!.open()
     await joinPromise
@@ -149,9 +149,9 @@ describe('useWebRTC', () => {
 
     expect(track.stop).toHaveBeenCalledOnce()
     expect(FakeWebSocket.instances[0]!.wasClosed).toBe(true)
-    expect(rtc.localStream.value).toBeNull()
-    expect(rtc.roomId.value).toBe('')
-    expect(rtc.isJoined.value).toBe(false)
-    expect(rtc.signalingState.value).toBe('idle')
+    expect(rtc.media.localStream.value).toBeNull()
+    expect(rtc.signaling.roomId.value).toBe('')
+    expect(rtc.signaling.isJoined.value).toBe(false)
+    expect(rtc.signaling.signalingState.value).toBe('idle')
   })
 })

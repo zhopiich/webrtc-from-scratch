@@ -11,37 +11,19 @@ import { useWebRTC } from '@/composables/useWebRTC'
 const roomDraft = ref('demo-room')
 
 const {
-  localStream,
-  remoteStream,
-  isJoined,
-  connectionState,
-  signalingState,
-  dataChannelState,
-  iceConnectionState,
-  iceGatheringState,
-  messages,
-  error,
+  media,
+  signaling,
+  peer,
+  chat,
   stats,
-  audioInputDevices,
-  videoInputDevices,
-  selectedAudioInputId,
-  selectedVideoInputId,
-  isAudioMuted,
-  isVideoOff,
-  canSendMessage,
-  startLocalMedia,
-  switchMediaDevice,
-  toggleAudioMuted,
-  toggleVideoOff,
-  joinRoom,
-  sendMessage,
+  error,
   hangUp,
 } = useWebRTC()
 
-const hasLocalMedia = computed(() => localStream.value !== null)
+const hasLocalMedia = computed(() => media.localStream.value !== null)
 
 async function join(): Promise<void> {
-  await joinRoom(roomDraft.value)
+  await signaling.joinRoom(roomDraft.value)
 }
 </script>
 
@@ -56,49 +38,49 @@ async function join(): Promise<void> {
 
     <RoomControls
       v-model="roomDraft"
-      :is-joined="isJoined"
+      :is-joined="signaling.isJoined.value"
       @join="join"
       @hang-up="hangUp"
     />
 
     <MediaControls
-      :audio-input-devices="audioInputDevices"
-      :video-input-devices="videoInputDevices"
-      :selected-audio-input-id="selectedAudioInputId"
-      :selected-video-input-id="selectedVideoInputId"
+      :audio-input-devices="media.audioInputDevices.value"
+      :video-input-devices="media.videoInputDevices.value"
+      :selected-audio-input-id="media.selectedAudioInputId.value"
+      :selected-video-input-id="media.selectedVideoInputId.value"
       :has-local-media="hasLocalMedia"
-      :is-audio-muted="isAudioMuted"
-      :is-video-off="isVideoOff"
-      @start-media="startLocalMedia"
-      @select-audio-input="switchMediaDevice('audioinput', $event)"
-      @select-video-input="switchMediaDevice('videoinput', $event)"
-      @toggle-audio-muted="toggleAudioMuted"
-      @toggle-video-off="toggleVideoOff"
+      :is-audio-muted="media.isAudioMuted.value"
+      :is-video-off="media.isVideoOff.value"
+      @start-media="media.startLocalMedia"
+      @select-audio-input="media.switchMediaDevice('audioinput', $event)"
+      @select-video-input="media.switchMediaDevice('videoinput', $event)"
+      @toggle-audio-muted="media.toggleAudioMuted"
+      @toggle-video-off="media.toggleVideoOff"
     />
 
     <ConnectionStatus
-      :signaling-state="signalingState"
-      :connection-state="connectionState"
-      :data-channel-state="dataChannelState"
+      :signaling-state="signaling.signalingState.value"
+      :connection-state="peer.connectionState.value"
+      :data-channel-state="chat.dataChannelState.value"
       :error="error"
     />
 
     <StatsPanel
-      :signaling-state="signalingState"
-      :ice-connection-state="iceConnectionState"
-      :ice-gathering-state="iceGatheringState"
-      :stats="stats"
+      :signaling-state="signaling.signalingState.value"
+      :ice-connection-state="peer.iceConnectionState.value"
+      :ice-gathering-state="peer.iceGatheringState.value"
+      :stats="stats.current.value"
     />
 
     <VideoPanel
-      :local-stream="localStream"
-      :remote-stream="remoteStream"
+      :local-stream="media.localStream.value"
+      :remote-stream="media.remoteStream.value"
     />
 
     <ChatPanel
-      :messages="messages"
-      :can-send="canSendMessage"
-      @send="sendMessage"
+      :messages="chat.messages.value"
+      :can-send="chat.canSendMessage.value"
+      @send="chat.sendMessage"
     />
   </main>
 </template>

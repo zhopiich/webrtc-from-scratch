@@ -1,412 +1,68 @@
-import { computed, ref } from 'vue'
+import type { ServerMessage } from './webrtc/types'
+import { ref } from 'vue'
+import { useDataChannel } from './webrtc/useDataChannel'
+import { useLocalMedia } from './webrtc/useLocalMedia'
+import { useSignaling } from './webrtc/useSignaling'
+import { useWebRTCStats } from './webrtc/useWebRTCStats'
 
-interface ChatMessage {
-  id: string
-  from: 'local' | 'remote'
-  text: string
-}
-
-export interface WebRTCStats {
-  selectedCandidatePair: string
-  localCandidate: string
-  remoteCandidate: string
-  roundTripTimeMs: number | null
-  availableOutgoingBitrateKbps: number | null
-  outboundVideoBitrateKbps: number | null
-  inboundVideoBitrateKbps: number | null
-  packetsLost: number | null
-  packetLossPercent: number | null
-  framesPerSecond: number | null
-  videoCodec: string
-}
-
-type SignalingState = 'idle' | 'connecting' | 'connected' | 'closed' | 'error'
-type DataChannelStatus = 'idle' | 'connecting' | 'open' | 'closed'
-type StatsRecord = RTCStats & Record<string, unknown>
-
-type ServerMessage
-  = | { type: 'room-joined', roomId: string }
-    | { type: 'peer-joined' }
-    | { type: 'offer', sdp: RTCSessionDescriptionInit }
-    | { type: 'answer', sdp: RTCSessionDescriptionInit }
-    | { type: 'ice-candidate', candidate: RTCIceCandidateInit }
-    | { type: 'peer-left' }
-    | { type: 'room-full' }
-    | { type: 'error', message: string }
-
-type ClientMessage
-  = | { type: 'join', roomId: string }
-    | { type: 'offer', sdp: RTCSessionDescriptionInit }
-    | { type: 'answer', sdp: RTCSessionDescriptionInit }
-    | { type: 'ice-candidate', candidate: RTCIceCandidateInit }
+export type { WebRTCStats } from './webrtc/types'
 
 const signalingUrl = import.meta.env.VITE_SIGNALING_URL || 'ws://localhost:3001'
 
-const emptyStats: WebRTCStats = {
-  selectedCandidatePair: 'unknown',
-  localCandidate: 'unknown',
-  remoteCandidate: 'unknown',
-  roundTripTimeMs: null,
-  availableOutgoingBitrateKbps: null,
-  outboundVideoBitrateKbps: null,
-  inboundVideoBitrateKbps: null,
-  packetsLost: null,
-  packetLossPercent: null,
-  framesPerSecond: null,
-  videoCodec: 'unknown',
-}
-
 export function useWebRTC() {
-  const localStream = ref<MediaStream | null>(null)
   const remoteStream = ref<MediaStream | null>(null)
   const roomId = ref('')
   const isJoined = ref(false)
   const connectionState = ref<RTCPeerConnectionState>('new')
-  const signalingState = ref<SignalingState>('idle')
-  const dataChannelState = ref<DataChannelStatus>('idle')
-  const messages = ref<ChatMessage[]>([])
-  const error = ref('')
-  const audioInputDevices = ref<MediaDeviceInfo[]>([])
-  const videoInputDevices = ref<MediaDeviceInfo[]>([])
-  const selectedAudioInputId = ref('')
-  const selectedVideoInputId = ref('')
-  const isAudioMuted = ref(false)
-  const isVideoOff = ref(false)
   const iceConnectionState = ref<RTCIceConnectionState>('new')
   const iceGatheringState = ref<RTCIceGatheringState>('new')
-  const stats = ref<WebRTCStats>({ ...emptyStats })
+  const error = ref('')
 
-  let socket: WebSocket | null = null
   let peerConnection: RTCPeerConnection | null = null
-  let dataChannel: RTCDataChannel | null = null
   let pendingIceCandidates: RTCIceCandidateInit[] = []
-  let statsIntervalId: ReturnType<typeof setInterval> | null = null
-  let previousInboundVideoBytes: { bytes: number, timestamp: number } | null = null
-  let previousOutboundVideoBytes: { bytes: number, timestamp: number } | null = null
 
-  const canSendMessage = computed(() => dataChannelState.value === 'open')
-
-  function numberValue(value: unknown): number | null {
-    return typeof value === 'number' && Number.isFinite(value) ? value : null
+  function setError(message: string): void {
+    error.value = message
   }
 
-  function stringValue(value: unknown): string {
-    return typeof value === 'string' && value ? value : 'unknown'
+  function getPeerConnection(): RTCPeerConnection | null {
+    return peerConnection
   }
 
-  function formatCandidate(candidate: StatsRecord | undefined): string {
-    if (!candidate) {
-      return 'unknown'
-    }
+  const statsControls = useWebRTCStats({ getPeerConnection })
 
-    const type = stringValue(candidate.candidateType)
-    const address = stringValue(candidate.address ?? candidate.ip)
-    const port = numberValue(candidate.port)
-    const protocol = stringValue(candidate.protocol)
+  const dataChannelControls = useDataChannel({
+    onError: setError,
+  })
 
-    return `${type} ${protocol} ${address}${port === null ? '' : `:${port}`}`
-  }
-
-  function calculateBitrateKbps(
-    currentBytes: number,
-    currentTimestamp: number,
-    previous: { bytes: number, timestamp: number } | null,
-  ): number | null {
-    if (!previous || currentTimestamp <= previous.timestamp) {
-      return null
-    }
-
-    const bits = (currentBytes - previous.bytes) * 8
-    const seconds = (currentTimestamp - previous.timestamp) / 1000
-
-    if (bits < 0 || seconds <= 0) {
-      return null
-    }
-
-    return Math.round(bits / seconds / 1000)
-  }
-
-  function findSelectedCandidatePair(report: RTCStatsReport): StatsRecord | undefined {
-    for (const entry of report.values()) {
-      const record = entry as StatsRecord
-
-      if (record.type === 'transport' && typeof record.selectedCandidatePairId === 'string') {
-        return report.get(record.selectedCandidatePairId) as StatsRecord | undefined
-      }
-    }
-
-    return [...report.values()]
-      .map(entry => entry as StatsRecord)
-      .find(record => record.type === 'candidate-pair' && (record.selected === true || record.nominated === true))
-  }
-
-  function findVideoCodec(report: RTCStatsReport, codecId: unknown): string {
-    if (typeof codecId !== 'string') {
-      return 'unknown'
-    }
-
-    const codec = report.get(codecId) as StatsRecord | undefined
-    const mimeType = stringValue(codec?.mimeType)
-
-    return mimeType === 'unknown' ? 'unknown' : mimeType.replace('video/', '')
-  }
-
-  async function updateStats(): Promise<void> {
-    if (!peerConnection || peerConnection.connectionState === 'closed') {
-      return
-    }
-
-    const report = await peerConnection.getStats()
-    const selectedPair = findSelectedCandidatePair(report)
-    const localCandidate = typeof selectedPair?.localCandidateId === 'string'
-      ? report.get(selectedPair.localCandidateId) as StatsRecord | undefined
-      : undefined
-    const remoteCandidate = typeof selectedPair?.remoteCandidateId === 'string'
-      ? report.get(selectedPair.remoteCandidateId) as StatsRecord | undefined
-      : undefined
-
-    let inboundVideoBytes = 0
-    let inboundVideoTimestamp = 0
-    let outboundVideoBytes = 0
-    let outboundVideoTimestamp = 0
-    let packetsLost = 0
-    let packetsReceived = 0
-    let framesPerSecond: number | null = null
-    let videoCodec = 'unknown'
-
-    for (const entry of report.values()) {
-      const record = entry as StatsRecord
-      const mediaKind = record.kind ?? record.mediaType
-
-      if (record.type === 'inbound-rtp' && mediaKind === 'video') {
-        inboundVideoBytes += numberValue(record.bytesReceived) ?? 0
-        inboundVideoTimestamp = Math.max(inboundVideoTimestamp, record.timestamp)
-        packetsLost += numberValue(record.packetsLost) ?? 0
-        packetsReceived += numberValue(record.packetsReceived) ?? 0
-        framesPerSecond = numberValue(record.framesPerSecond) ?? framesPerSecond
-        videoCodec = findVideoCodec(report, record.codecId)
+  const localMedia = useLocalMedia({
+    getPeerConnection,
+    onStreamStarted: async () => {
+      if (!peerConnection) {
+        return
       }
 
-      if (record.type === 'outbound-rtp' && mediaKind === 'video') {
-        outboundVideoBytes += numberValue(record.bytesSent) ?? 0
-        outboundVideoTimestamp = Math.max(outboundVideoTimestamp, record.timestamp)
-
-        if (videoCodec === 'unknown') {
-          videoCodec = findVideoCodec(report, record.codecId)
-        }
-      }
-    }
-
-    const inboundVideoBitrateKbps = calculateBitrateKbps(
-      inboundVideoBytes,
-      inboundVideoTimestamp,
-      previousInboundVideoBytes,
-    )
-    const outboundVideoBitrateKbps = calculateBitrateKbps(
-      outboundVideoBytes,
-      outboundVideoTimestamp,
-      previousOutboundVideoBytes,
-    )
-
-    if (inboundVideoTimestamp > 0) {
-      previousInboundVideoBytes = { bytes: inboundVideoBytes, timestamp: inboundVideoTimestamp }
-    }
-
-    if (outboundVideoTimestamp > 0) {
-      previousOutboundVideoBytes = { bytes: outboundVideoBytes, timestamp: outboundVideoTimestamp }
-    }
-
-    const totalPackets = packetsLost + packetsReceived
-    const packetLossPercent = totalPackets > 0
-      ? Number(((packetsLost / totalPackets) * 100).toFixed(2))
-      : null
-
-    stats.value = {
-      selectedCandidatePair: selectedPair ? stringValue(selectedPair.id) : 'unknown',
-      localCandidate: formatCandidate(localCandidate),
-      remoteCandidate: formatCandidate(remoteCandidate),
-      roundTripTimeMs: numberValue(selectedPair?.currentRoundTripTime) === null
-        ? null
-        : Math.round(numberValue(selectedPair?.currentRoundTripTime)! * 1000),
-      availableOutgoingBitrateKbps: numberValue(selectedPair?.availableOutgoingBitrate) === null
-        ? null
-        : Math.round(numberValue(selectedPair?.availableOutgoingBitrate)! / 1000),
-      outboundVideoBitrateKbps,
-      inboundVideoBitrateKbps,
-      packetsLost: totalPackets > 0 ? packetsLost : null,
-      packetLossPercent,
-      framesPerSecond,
-      videoCodec,
-    }
-  }
-
-  function startStatsPolling(): void {
-    if (statsIntervalId) {
-      return
-    }
-
-    void updateStats().catch(() => {})
-    statsIntervalId = setInterval(() => {
-      void updateStats().catch(() => {})
-    }, 1000)
-  }
-
-  function stopStatsPolling(): void {
-    if (statsIntervalId) {
-      clearInterval(statsIntervalId)
-      statsIntervalId = null
-    }
-
-    previousInboundVideoBytes = null
-    previousOutboundVideoBytes = null
-  }
-
-  function sendSignal(message: ClientMessage): void {
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
-      error.value = 'Signaling server is not connected.'
-      return
-    }
-
-    socket.send(JSON.stringify(message))
-  }
-
-  async function loadDevices(): Promise<void> {
-    if (!navigator.mediaDevices?.enumerateDevices) {
-      return
-    }
-
-    const devices = await navigator.mediaDevices.enumerateDevices()
-    audioInputDevices.value = devices.filter(device => device.kind === 'audioinput')
-    videoInputDevices.value = devices.filter(device => device.kind === 'videoinput')
-  }
-
-  function getMediaConstraints(): MediaStreamConstraints {
-    return {
-      video: selectedVideoInputId.value
-        ? { deviceId: { exact: selectedVideoInputId.value } }
-        : true,
-      audio: selectedAudioInputId.value
-        ? { deviceId: { exact: selectedAudioInputId.value } }
-        : true,
-    }
-  }
-
-  function applyTrackState(): void {
-    for (const track of localStream.value?.getAudioTracks() ?? []) {
-      track.enabled = !isAudioMuted.value
-    }
-
-    for (const track of localStream.value?.getVideoTracks() ?? []) {
-      track.enabled = !isVideoOff.value
-    }
-  }
-
-  async function startLocalMedia(): Promise<void> {
-    error.value = ''
-
-    if (localStream.value) {
-      return
-    }
-
-    try {
-      localStream.value = await navigator.mediaDevices.getUserMedia(getMediaConstraints())
-      applyTrackState()
-      await loadDevices()
-
-      if (peerConnection) {
-        addLocalTracks(peerConnection)
-        await createAndSendOffer()
-      }
-    }
-    catch (caughtError) {
-      error.value = caughtError instanceof Error ? caughtError.message : 'Could not start camera or microphone.'
-    }
-  }
-
-  async function switchMediaDevice(kind: 'audioinput' | 'videoinput', deviceId: string): Promise<void> {
-    error.value = ''
-
-    if (kind === 'audioinput') {
-      selectedAudioInputId.value = deviceId
-    }
-    else {
-      selectedVideoInputId.value = deviceId
-    }
-
-    if (!localStream.value) {
-      return
-    }
-
-    try {
-      const nextStream = await navigator.mediaDevices.getUserMedia(getMediaConstraints())
-      const previousStream = localStream.value
-      localStream.value = nextStream
-      applyTrackState()
-
-      for (const track of previousStream.getTracks()) {
-        track.stop()
-      }
-
-      if (peerConnection) {
-        for (const sender of peerConnection.getSenders()) {
-          const nextTrack = nextStream.getTracks().find(track => track.kind === sender.track?.kind)
-
-          if (nextTrack) {
-            await sender.replaceTrack(nextTrack)
-          }
-        }
-      }
-    }
-    catch (caughtError) {
-      error.value = caughtError instanceof Error ? caughtError.message : 'Could not switch media device.'
-    }
-  }
-
-  function toggleAudioMuted(): void {
-    isAudioMuted.value = !isAudioMuted.value
-    applyTrackState()
-  }
-
-  function toggleVideoOff(): void {
-    isVideoOff.value = !isVideoOff.value
-    applyTrackState()
-  }
+      addLocalTracks(peerConnection)
+      await createAndSendOffer()
+    },
+    onError: setError,
+  })
 
   function addLocalTracks(pc: RTCPeerConnection): void {
-    if (!localStream.value) {
+    if (!localMedia.localStream.value) {
       return
     }
 
-    for (const track of localStream.value.getTracks()) {
-      pc.addTrack(track, localStream.value)
+    for (const track of localMedia.localStream.value.getTracks()) {
+      pc.addTrack(track, localMedia.localStream.value)
     }
   }
 
-  function setupDataChannel(channel: RTCDataChannel): void {
-    dataChannel = channel
-    dataChannelState.value = channel.readyState === 'open' ? 'open' : 'connecting'
-
-    channel.onopen = () => {
-      dataChannelState.value = 'open'
-    }
-
-    channel.onclose = () => {
-      dataChannelState.value = 'closed'
-    }
-
-    channel.onerror = () => {
-      error.value = 'DataChannel error.'
-      dataChannelState.value = 'closed'
-    }
-
-    channel.onmessage = (event) => {
-      messages.value.push({
-        id: crypto.randomUUID(),
-        from: 'remote',
-        text: String(event.data),
-      })
-    }
-  }
+  const signaling = useSignaling({
+    url: signalingUrl,
+    onMessage: handleServerMessage,
+    onError: setError,
+  })
 
   function createPeerConnection(): RTCPeerConnection {
     if (peerConnection) {
@@ -439,7 +95,7 @@ export function useWebRTC() {
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
-        sendSignal({
+        signaling.sendSignal({
           type: 'ice-candidate',
           candidate: event.candidate.toJSON(),
         })
@@ -457,11 +113,11 @@ export function useWebRTC() {
     }
 
     pc.ondatachannel = (event) => {
-      setupDataChannel(event.channel)
+      dataChannelControls.setupDataChannel(event.channel)
     }
 
     addLocalTracks(pc)
-    startStatsPolling()
+    statsControls.startStatsPolling()
 
     return pc
   }
@@ -469,14 +125,14 @@ export function useWebRTC() {
   async function createAndSendOffer(): Promise<void> {
     const pc = createPeerConnection()
 
-    if (!dataChannel) {
-      setupDataChannel(pc.createDataChannel('chat'))
+    if (!dataChannelControls.hasDataChannel()) {
+      dataChannelControls.setupDataChannel(pc.createDataChannel('chat'))
     }
 
     const offer = await pc.createOffer()
     await pc.setLocalDescription(offer)
 
-    sendSignal({
+    signaling.sendSignal({
       type: 'offer',
       sdp: offer,
     })
@@ -503,7 +159,7 @@ export function useWebRTC() {
     const answer = await pc.createAnswer()
     await pc.setLocalDescription(answer)
 
-    sendSignal({
+    signaling.sendSignal({
       type: 'answer',
       sdp: answer,
     })
@@ -528,9 +184,7 @@ export function useWebRTC() {
   }
 
   function closePeerConnection(): void {
-    dataChannel?.close()
-    dataChannel = null
-    dataChannelState.value = 'closed'
+    dataChannelControls.closeDataChannel()
 
     peerConnection?.close()
     peerConnection = null
@@ -539,36 +193,20 @@ export function useWebRTC() {
     iceGatheringState.value = 'complete'
     remoteStream.value = null
     pendingIceCandidates = []
-    stopStatsPolling()
-    stats.value = { ...emptyStats }
+    statsControls.resetStats()
   }
 
   function hangUp(): void {
     closePeerConnection()
-
-    if (socket) {
-      socket.onopen = null
-      socket.onmessage = null
-      socket.onerror = null
-      socket.onclose = null
-      socket.close()
-      socket = null
-    }
-
-    signalingState.value = 'idle'
-
-    localStream.value?.getTracks().forEach(track => track.stop())
-    localStream.value = null
-    isAudioMuted.value = false
-    isVideoOff.value = false
+    signaling.closeSignaling()
+    localMedia.stopLocalMedia()
 
     roomId.value = ''
     isJoined.value = false
     connectionState.value = 'new'
     iceConnectionState.value = 'new'
     iceGatheringState.value = 'new'
-    dataChannelState.value = 'idle'
-    messages.value = []
+    dataChannelControls.resetDataChannel()
   }
 
   async function handleServerMessage(message: ServerMessage): Promise<void> {
@@ -615,39 +253,6 @@ export function useWebRTC() {
     }
   }
 
-  function connectSignaling(nextRoomId: string): Promise<void> {
-    signalingState.value = 'connecting'
-
-    return new Promise((resolve, reject) => {
-      socket = new WebSocket(signalingUrl)
-
-      socket.onopen = () => {
-        signalingState.value = 'connected'
-        sendSignal({ type: 'join', roomId: nextRoomId })
-        resolve()
-      }
-
-      socket.onmessage = async (event) => {
-        try {
-          await handleServerMessage(JSON.parse(event.data) as ServerMessage)
-        }
-        catch {
-          console.warn('Unknown signaling message:', event.data)
-        }
-      }
-
-      socket.onerror = () => {
-        signalingState.value = 'error'
-        error.value = 'Could not connect to signaling server.'
-        reject(new Error(error.value))
-      }
-
-      socket.onclose = () => {
-        signalingState.value = 'closed'
-      }
-    })
-  }
-
   async function joinRoom(nextRoomId: string): Promise<void> {
     error.value = ''
     const normalizedRoomId = nextRoomId.trim()
@@ -658,7 +263,7 @@ export function useWebRTC() {
     }
 
     try {
-      await connectSignaling(normalizedRoomId)
+      await signaling.connectSignaling(normalizedRoomId)
     }
     catch (caughtError) {
       error.value = caughtError instanceof Error ? caughtError.message : 'Could not join room.'
@@ -666,48 +271,59 @@ export function useWebRTC() {
     }
   }
 
-  function sendMessage(text: string): void {
-    const trimmedText = text.trim()
+  async function startLocalMedia(): Promise<void> {
+    error.value = ''
+    await localMedia.startLocalMedia()
+  }
 
-    if (!trimmedText || !dataChannel || dataChannel.readyState !== 'open') {
-      return
-    }
+  async function switchMediaDevice(kind: 'audioinput' | 'videoinput', deviceId: string): Promise<void> {
+    error.value = ''
+    await localMedia.switchMediaDevice(kind, deviceId)
+  }
 
-    dataChannel.send(trimmedText)
-    messages.value.push({
-      id: crypto.randomUUID(),
-      from: 'local',
-      text: trimmedText,
-    })
+  const media = {
+    localStream: localMedia.localStream,
+    remoteStream,
+    audioInputDevices: localMedia.audioInputDevices,
+    videoInputDevices: localMedia.videoInputDevices,
+    selectedAudioInputId: localMedia.selectedAudioInputId,
+    selectedVideoInputId: localMedia.selectedVideoInputId,
+    isAudioMuted: localMedia.isAudioMuted,
+    isVideoOff: localMedia.isVideoOff,
+    loadDevices: localMedia.loadDevices,
+    startLocalMedia,
+    switchMediaDevice,
+    toggleAudioMuted: localMedia.toggleAudioMuted,
+    toggleVideoOff: localMedia.toggleVideoOff,
+  }
+  const signalingState = {
+    roomId,
+    isJoined,
+    signalingState: signaling.signalingState,
+    joinRoom,
+  }
+  const peer = {
+    connectionState,
+    iceConnectionState,
+    iceGatheringState,
+  }
+  const chat = {
+    dataChannelState: dataChannelControls.dataChannelState,
+    messages: dataChannelControls.messages,
+    canSendMessage: dataChannelControls.canSendMessage,
+    sendMessage: dataChannelControls.sendMessage,
+  }
+  const stats = {
+    current: statsControls.stats,
   }
 
   return {
-    localStream,
-    remoteStream,
-    roomId,
-    isJoined,
-    connectionState,
-    signalingState,
-    dataChannelState,
-    iceConnectionState,
-    iceGatheringState,
-    messages,
-    error,
+    media,
+    signaling: signalingState,
+    peer,
+    chat,
     stats,
-    audioInputDevices,
-    videoInputDevices,
-    selectedAudioInputId,
-    selectedVideoInputId,
-    isAudioMuted,
-    isVideoOff,
-    canSendMessage,
-    loadDevices,
-    startLocalMedia,
-    switchMediaDevice,
-    toggleAudioMuted,
-    toggleVideoOff,
-    joinRoom,
-    sendMessage,
+    error,
     hangUp,
   }
 }
