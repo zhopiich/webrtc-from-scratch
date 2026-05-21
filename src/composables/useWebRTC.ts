@@ -1,5 +1,6 @@
 import type { ServerMessage } from './webrtc/types'
 import { ref } from 'vue'
+import { getIceServers } from './webrtc/iceServers'
 import { useDataChannel } from './webrtc/useDataChannel'
 import { useLocalMedia } from './webrtc/useLocalMedia'
 import { useSignaling } from './webrtc/useSignaling'
@@ -70,9 +71,7 @@ export function useWebRTC() {
     }
 
     const pc = new RTCPeerConnection({
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-      ],
+      iceServers: getIceServers(),
     })
 
     peerConnection = pc
