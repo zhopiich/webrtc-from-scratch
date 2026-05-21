@@ -35,6 +35,8 @@ class FakeWebSocket {
 
 function createTrack() {
   return {
+    enabled: true,
+    kind: 'audio',
     stop: vi.fn(),
   } as unknown as MediaStreamTrack
 }
@@ -42,6 +44,8 @@ function createTrack() {
 function createStream(tracks: MediaStreamTrack[]) {
   return {
     getTracks: () => tracks,
+    getAudioTracks: () => tracks.filter(track => track.kind === 'audio'),
+    getVideoTracks: () => tracks.filter(track => track.kind === 'video'),
   } as unknown as MediaStream
 }
 
@@ -55,6 +59,7 @@ describe('useWebRTC', () => {
     Object.defineProperty(navigator, 'mediaDevices', {
       configurable: true,
       value: {
+        enumerateDevices: vi.fn().mockResolvedValue([]),
         getUserMedia: vi.fn(),
       },
     })
@@ -106,6 +111,27 @@ describe('useWebRTC', () => {
       audio: true,
     })
     expect(rtc.localStream.value).not.toBeNull()
+  })
+
+  it('toggles audio and video tracks without stopping media', async () => {
+    const audioTrack = createTrack()
+    const videoTrack = {
+      ...createTrack(),
+      kind: 'video',
+    } as unknown as MediaStreamTrack
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockResolvedValue(createStream([audioTrack, videoTrack]))
+    const rtc = useWebRTC()
+
+    await rtc.startLocalMedia()
+    rtc.toggleAudioMuted()
+    rtc.toggleVideoOff()
+
+    expect(audioTrack.enabled).toBe(false)
+    expect(videoTrack.enabled).toBe(false)
+    expect(rtc.isAudioMuted.value).toBe(true)
+    expect(rtc.isVideoOff.value).toBe(true)
+    expect(audioTrack.stop).not.toHaveBeenCalled()
+    expect(videoTrack.stop).not.toHaveBeenCalled()
   })
 
   it('stops local tracks and closes signaling when hanging up after join', async () => {
