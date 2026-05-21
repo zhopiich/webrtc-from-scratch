@@ -252,7 +252,7 @@ describe('useWebRTC', () => {
     expect(rtc.signaling.signalingState.value).toBe('idle')
   })
 
-  it('restarts ICE and sends a new offer when ICE fails', async () => {
+  it('delegates ICE failure recovery and sends a restart offer', async () => {
     vi.useFakeTimers()
     vi.stubGlobal('RTCPeerConnection', FakeRTCPeerConnection)
     vi.stubGlobal('MediaStream', FakeMediaStream)
