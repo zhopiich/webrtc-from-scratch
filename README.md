@@ -1,15 +1,43 @@
 # WebRTC 1-on-1 Video Chat Demo
 
+the basic WebRTC flow from scratch
+
 ## Features
 
 - `getUserMedia` local camera and microphone
-- `RTCPeerConnection` 1-on-1 audio/video
-- WebSocket signaling server
-- Room join
+- `RTCPeerConnection` audio/video
 - Offer, answer, and ICE candidate exchange
 - DataChannel text chat
-- Hang up cleanup for media tracks and connections
-- Connection state display
+- Hang up cleanup for peer connections and media tracks
+- Connection state, ICE state, signaling state, and WebRTC stats display
+- Configurable STUN / TURN servers
+- GitHub Pages frontend deployment
+
+## Architecture
+
+```mermaid
+flowchart LR
+  A[Browser A<br/>Vue frontend] <-->|offer / answer / ICE<br/>WebSocket signaling| S[Node signaling server<br/>HTTP + WebSocket]
+  B[Browser B<br/>Vue frontend] <-->|offer / answer / ICE<br/>WebSocket signaling| S
+
+  A <-->|audio / video<br/>DataChannel chat| B
+
+  A -.->|STUN / TURN discovery| I[ICE servers]
+  B -.->|STUN / TURN discovery| I
+```
+
+Signaling only coordinates connection setup. After WebRTC connects, audio, video, and DataChannel messages are sent between browsers through WebRTC. Depending on the network, traffic may be direct peer-to-peer or relayed through a TURN server.
+
+## Project Structure
+
+```text
+server/signaling.ts                  Node HTTP + WebSocket signaling server
+src/composables/useWebRTC.ts         WebRTC session facade
+src/composables/webrtc/              Smaller WebRTC composables
+src/pages/VideoChatPage.vue          Main page
+src/components/                      UI components
+.github/workflows/deploy-pages.yml   GitHub Pages workflow
+```
 
 ## Setup
 
@@ -17,6 +45,8 @@
 pnpm install
 cp .env.example .env
 ```
+
+The project expects Node.js `^20.19.0 || >=22.12.0`.
 
 ## Local Development
 
@@ -40,45 +70,103 @@ http://localhost:5173
 
 Enter the same room id in both tabs.
 
-## Environment
+## Environment Variables
+
+Frontend environment variables use the `VITE_` prefix because they are read by Vite at build time.
+
+Local `.env`:
 
 ```text
 VITE_SIGNALING_URL=ws://localhost:3001
 ```
 
-For HTTPS deployments, use a secure WebSocket URL:
+Production frontend builds should use a secure WebSocket URL:
 
 ```text
-VITE_SIGNALING_URL=wss://your-signaling.example.com
+VITE_SIGNALING_URL=wss://your-signaling-service.example.com
 ```
+
+Optional ICE server settings:
+
+```text
+VITE_STUN_URL=stun:stun.l.google.com:19302
+VITE_TURN_URL=turn:your-turn.example.com:3478
+VITE_TURN_USERNAME=your-turn-username
+VITE_TURN_CREDENTIAL=your-turn-password
+```
+
+If the TURN variables are incomplete, the app ignores TURN and only uses STUN.
+
+The signaling server reads:
+
+```text
+PORT=3001
+```
+
+Most cloud platforms set `PORT` automatically, so you usually do not need to configure it manually.
+
+## STUN / TURN
+
+Default behavior:
+
+- Uses `stun:stun.l.google.com:19302` when `VITE_STUN_URL` is not set.
+- Adds TURN only when `VITE_TURN_URL`, `VITE_TURN_USERNAME`, and `VITE_TURN_CREDENTIAL` are all present.
+- TURN credentials belong in deployment environment variables, not committed source files.
+
+## Signaling Server Deployment
+
+Deploy `server/signaling.ts` to a host that supports long-running Node processes and WebSocket connections, for example Render or Railway.
+
+Suggested service settings:
+
+```text
+Service type: Web Service
+Runtime: Node
+Build Command: pnpm install --frozen-lockfile
+Start Command: pnpm start:server
+Health Check Path: /health
+```
+
+The server exposes:
+
+```text
+GET /health -> ok
+```
+
+After deployment, copy the public WebSocket URL:
+
+```text
+wss://your-signaling-service.onrender.com
+```
+
+Use that value as `VITE_SIGNALING_URL` when building or deploying the frontend.
 
 ## GitHub Pages Deployment
 
-The frontend deploys with GitHub Actions from `.github/workflows/deploy-pages.yml`.
+The frontend deploys through:
+
+```text
+.github/workflows/deploy-pages.yml
+```
 
 Before deploying:
 
-1. Deploy the signaling server to a host that supports WebSockets.
-2. Copy its public WebSocket URL, for example:
+1. Deploy the signaling server first.
+2. Enable GitHub Pages with source set to GitHub Actions.
+3. Add an Actions repository variable:
 
-   ```text
-   wss://your-signaling-service.onrender.com
-   ```
+```text
+Settings > Secrets and variables > Actions > Variables > New repository variable
+```
 
-3. In GitHub, open repository settings and add an Actions repository variable:
+```text
+Name: VITE_SIGNALING_URL
+Value: wss://your-signaling-service.example.com
+```
 
-   ```text
-   Settings > Secrets and variables > Actions > Variables > New repository variable
-   ```
+4. Push to `main` or run the workflow manually.
 
-   ```text
-   Name: VITE_SIGNALING_URL
-   Value: wss://your-signaling-service.onrender.com
-   ```
-
-4. Enable GitHub Pages with source set to GitHub Actions.
-
-The workflow uses:
+The workflow currently builds with:
 
 ```text
 BASE_PATH=/webrtc-from-scratch/
@@ -88,29 +176,34 @@ If the repository name changes, update `BASE_PATH` in `.github/workflows/deploy-
 
 ## WebRTC Flow
 
-1. Both clients join the same signaling room.
-2. The first peer receives `peer-joined` and creates an offer.
-3. The second peer receives the offer and creates an answer.
-4. Both peers exchange ICE candidates through the signaling server.
-5. Text chat uses a WebRTC DataChannel.
-6. Users can enable local media with `Start media`.
-7. Audio and video flow peer-to-peer through WebRTC after media starts.
+1. Both clients connect to the signaling server.
+2. Both clients join the same room id.
+3. When the second peer joins, the first peer creates an offer.
+4. The offer is sent through the signaling server.
+5. The second peer sets the remote offer and creates an answer.
+6. The answer is sent back through the signaling server.
+7. Both peers exchange ICE candidates through the signaling server.
+8. WebRTC establishes the media path.
+9. Text chat uses a WebRTC DataChannel.
+10. Hang up closes peer connections, DataChannels, sockets, and media tracks.
 
 ## Verification
 
 Run:
 
 ```sh
-pnpm build
 pnpm lint
+pnpm test:unit --run
+pnpm build
 ```
 
 Manual checks:
 
-- Local video appears in both clients.
-- Remote video appears in both clients.
-- Joining without camera or microphone permission still enters the room.
-- Peer connection reaches `connected`.
+- Two clients can join the same room.
+- A third client receives `Room is full`.
+- Joining without camera or microphone permission still works.
+- `Start media` triggers browser permission and shows local video.
+- Remote video appears after both peers enable media.
 - DataChannel messages work in both directions.
+- Connection state and stats update.
 - Hang up stops camera and microphone.
-- A third client joining the same room receives `Room is full`.
