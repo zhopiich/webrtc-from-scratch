@@ -88,10 +88,4 @@ button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
-
-@media (max-width: 680px) {
-  .room-controls {
-    grid-template-columns: 1fr;
-  }
-}
 </style>
