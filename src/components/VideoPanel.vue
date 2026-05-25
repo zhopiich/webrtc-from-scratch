@@ -33,41 +33,27 @@ watch([() => props.remoteStream, remoteVideo], ([stream, video]) => {
 </script>
 
 <template>
-  <section class="video-grid" aria-label="Video chat">
-    <article>
-      <header>Local</header>
+  <section class="video-stage" aria-label="Video chat">
+    <video ref="remoteVideo" class="remote-video" autoplay playsinline />
+    <span class="remote-label">Remote</span>
+
+    <div class="local-preview">
       <video ref="localVideo" autoplay playsinline muted />
-    </article>
-    <article>
-      <header>Remote</header>
-      <video ref="remoteVideo" autoplay playsinline />
-    </article>
+      <span>Local</span>
+    </div>
   </section>
 </template>
 
 <style scoped>
-.video-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-article {
+.video-stage {
+  position: relative;
   overflow: hidden;
   border: 1px solid #d7dde5;
   border-radius: 8px;
-  background: #ffffff;
+  background: #111827;
 }
 
-header {
-  padding: 10px 12px;
-  border-bottom: 1px solid #d7dde5;
-  color: #526173;
-  font-size: 0.875rem;
-  font-weight: 700;
-}
-
-video {
+.remote-video {
   display: block;
   width: 100%;
   aspect-ratio: 16 / 9;
@@ -75,9 +61,44 @@ video {
   object-fit: cover;
 }
 
-@media (max-width: 760px) {
-  .video-grid {
-    grid-template-columns: 1fr;
-  }
+.remote-label,
+.local-preview span {
+  position: absolute;
+  border-radius: 4px;
+  padding: 4px 8px;
+  background: rgb(15 23 42 / 76%);
+  color: #ffffff;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.remote-label {
+  right: 12px;
+  bottom: 12px;
+}
+
+.local-preview {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  overflow: hidden;
+  width: clamp(112px, 26%, 208px);
+  border: 1px solid rgb(255 255 255 / 32%);
+  border-radius: 6px;
+  background: #1e293b;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 25%);
+}
+
+.local-preview video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+}
+
+.local-preview span {
+  top: 6px;
+  left: 6px;
+  padding: 3px 6px;
 }
 </style>
