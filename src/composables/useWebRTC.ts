@@ -234,6 +234,9 @@ export function useWebRTC() {
     }
 
     if (message.type === 'peer-joined') {
+      if (error.value === 'Peer left the room.') {
+        error.value = ''
+      }
       await createAndSendOffer()
       return
     }
