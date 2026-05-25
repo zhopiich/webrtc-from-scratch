@@ -59,6 +59,7 @@ function sendDraft(): void {
 <style scoped>
 .chat-panel {
   display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
   gap: 12px;
   border: 1px solid #d7dde5;
   border-radius: 8px;
@@ -70,7 +71,7 @@ function sendDraft(): void {
   display: grid;
   align-content: start;
   min-height: 180px;
-  max-height: 280px;
+  max-height: none;
   overflow-y: auto;
   gap: 8px;
 }
@@ -140,6 +141,12 @@ button:disabled {
 @media (max-width: 520px) {
   .chat-form {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 820px) {
+  .messages {
+    max-height: 280px;
   }
 }
 </style>
