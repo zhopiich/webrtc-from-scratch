@@ -44,6 +44,19 @@ async function join(): Promise<void> {
       @hang-up="hangUp"
     />
 
+    <section class="call-workspace" aria-label="Call workspace">
+      <VideoPanel
+        :local-stream="media.localStream.value"
+        :remote-stream="media.remoteStream.value"
+      />
+
+      <ChatPanel
+        :messages="chat.messages.value"
+        :can-send="chat.canSendMessage.value"
+        @send="chat.sendMessage"
+      />
+    </section>
+
     <MediaControls
       :audio-input-devices="media.audioInputDevices.value"
       :video-input-devices="media.videoInputDevices.value"
@@ -72,17 +85,6 @@ async function join(): Promise<void> {
       :ice-connection-state="peer.iceConnectionState.value"
       :ice-gathering-state="peer.iceGatheringState.value"
       :stats="stats.current.value"
-    />
-
-    <VideoPanel
-      :local-stream="media.localStream.value"
-      :remote-stream="media.remoteStream.value"
-    />
-
-    <ChatPanel
-      :messages="chat.messages.value"
-      :can-send="chat.canSendMessage.value"
-      @send="chat.sendMessage"
     />
   </main>
 </template>
@@ -118,9 +120,22 @@ async function join(): Promise<void> {
   line-height: 1;
 }
 
+.call-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(272px, 29%, 320px);
+  gap: 12px;
+  align-items: stretch;
+}
+
 @media (max-width: 680px) {
   .page-header h1 {
     font-size: 2rem;
+  }
+}
+
+@media (max-width: 820px) {
+  .call-workspace {
+    grid-template-columns: 1fr;
   }
 }
 </style>
